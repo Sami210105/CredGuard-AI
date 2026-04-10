@@ -2,7 +2,6 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel
 
-
 class TopFactor(BaseModel):
     feature: str
     label: str
@@ -12,7 +11,7 @@ class TopFactor(BaseModel):
 
 class Counterfactual(BaseModel):
     feature: str
-    label: str
+    label: str  
     current_value: Optional[float]
     suggested_value: float
     impact_direction: str  # "increase" | "decrease"

@@ -1,99 +1,184 @@
-import * as DocumentPicker from "expo-document-picker";
-import { useState } from "react";
+import { useEffect, useRef } from "react";
 import {
   FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
-import { questions as initialMessages } from "../constants/questions.tsx"
+import ChatBubble from "../components/Chatbubble";
+import Input from "../components/Input";
+import { Colors, FontSize } from "../constants/credguard-theme";
+import { QUESTIONS } from "../constants/questions";
+import { useApp } from "../context/AppContext";
 
 export default function ChatScreen() {
-  const [messages, setMessages] = useState(initialMessages);
-  const [input, setInput] = useState("");
-  const [step, setStep] = useState(0);
+  const {
+    messages,
+    answers,
+    currentQuestionIndex,
+    assessmentComplete,
+    addMessage,
+    recordAnswer,
+    markQuestionAnswered,
+    advanceQuestion,
+    setAssessmentComplete,
+    getProgressPercent,
+    getCurrentSectionLabel,
+  } = useApp();
 
+  const flatRef = useRef<FlatList>(null);
 
-  const pickDocument = async () => {
-    let result = await DocumentPicker.getDocumentAsync({});
-    console.log(result);
-  };
-
-  const handleSend = () => {
-    if (!input) return;
-
-    const userMsg = { id: Date.now(), text: input, sender: "user" };
-    let botReply = "";
-
-    // FLOW LOGIC
-    if (step === 0) {
-      botReply = "Got it. What's your credit score?";
-      setStep(1);
-    } else if (step === 1) {
-      botReply = "Do you have any existing loans?";
-      setStep(2);
-    } else if (step === 2) {
-      botReply = "Great. Now upload your documents 📄";
-      setStep(3);
+  // Push first question once on mount
+  useEffect(() => {
+    if (messages.length === 1 && QUESTIONS.length > 0) {
+      setTimeout(() => pushQuestion(0), 500);
     }
+  }, []);
 
-    setMessages((prev) => [
-      ...prev,
-      userMsg,
-      { id: Date.now() + 1, text: botReply, sender: "bot" },
-    ]);
+  function pushQuestion(index: number) {
+    const q = QUESTIONS[index];
+    if (!q) return;
+    addMessage({
+      role: "bot",
+      text: q.text,
+      chips: q.options,
+      questionId: q.id,
+      answered: false,
+    });
+  }
 
-    setInput("");
-  };
+  function handleSelectOption(
+    questionId: string,
+    option: { label: string; value: string; score: number },
+  ) {
+    const qIndex = QUESTIONS.findIndex((q) => q.id === questionId);
+    if (qIndex === -1) return;
+    const q = QUESTIONS[qIndex];
+
+    // Record answer in context
+    recordAnswer(questionId, option);
+
+    // Swap chips → selected label on the question bubble
+    markQuestionAnswered(questionId, option.label);
+
+    // User echo bubble
+    addMessage({ role: "user", text: option.label });
+
+    // Signal badge bubble
+    addMessage({
+      role: "bot",
+      text: "",
+      signalLabel: q.signalLabel,
+      answered: true,
+    });
+
+    advanceQuestion();
+
+    const nextIndex = qIndex + 1;
+
+    if (nextIndex < QUESTIONS.length) {
+      setTimeout(() => pushQuestion(nextIndex), 700);
+    } else {
+      setTimeout(() => {
+        setAssessmentComplete(true);
+        addMessage({
+          role: "bot",
+          text: "Assessment complete! Your behavioral profile has been built.\n\nHead to the Documents tab to upload verification, or check your CredScore tab for your preliminary result.",
+        });
+      }, 900);
+    }
+  }
+
+  const progress = getProgressPercent();
+  const sectionLabel = getCurrentSectionLabel();
 
   return (
-    <View style={{ flex: 1, padding: 20, paddingTop: 50 }}>
-      <FlatList
-        data={messages}
-        keyExtractor={(item) => item.id.toString()}
-        contentContainerStyle={{ paddingBottom: 20 }}
-        renderItem={({ item }) => (
-          <Text
-            style={{
-              alignSelf: item.sender === "user" ? "flex-end" : "flex-start",
-              backgroundColor: item.sender === "user" ? "#4CAF50" : "#E0E0E0",
-              padding: 10,
-              borderRadius: 10,
-              marginVertical: 5,
-              maxWidth: "80%",
-            }}
-          >
-            {item.text}
+    <KeyboardAvoidingView
+      style={styles.root}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={90}
+    >
+      {/* Progress bar */}
+      <View style={styles.progressWrap}>
+        <View style={styles.progressMeta}>
+          <Text style={styles.progressLabel}>
+            {assessmentComplete
+              ? "Assessment complete"
+              : sectionLabel
+                ? `${sectionLabel}`
+                : "Starting..."}
           </Text>
+          <Text style={styles.progressPct}>{progress}%</Text>
+        </View>
+        <View style={styles.track}>
+          <View style={[styles.fill, { width: `${progress}%` as any }]} />
+        </View>
+      </View>
+
+      {/* Messages */}
+      <FlatList
+        ref={flatRef}
+        data={messages}
+        keyExtractor={(m) => m.id}
+        renderItem={({ item }) => (
+          <ChatBubble message={item} onSelectOption={handleSelectOption} />
         )}
+        contentContainerStyle={styles.list}
+        onContentSizeChange={() =>
+          flatRef.current?.scrollToEnd({ animated: true })
+        }
+        onLayout={() => flatRef.current?.scrollToEnd({ animated: false })}
+        showsVerticalScrollIndicator={false}
       />
 
-      {/* SHOW UPLOAD BUTTON ONLY AT STEP 3 */}
-      {step === 3 && (
-        <TouchableOpacity onPress={pickDocument}>
-          <Text style={{ color: "blue", marginVertical: 10 }}>
-            Upload Document 📄
-          </Text>
-        </TouchableOpacity>
-      )}
-
-      <View style={{ flexDirection: "row", alignItems: "center" }}>
-        <TextInput
-          value={input}
-          onChangeText={setInput}
-          placeholder="Type your answer..."
-          style={{
-            flex: 1,
-            borderWidth: 1,
-            padding: 10,
-            borderRadius: 10,
-          }}
-        />
-        <TouchableOpacity onPress={handleSend}>
-          <Text style={{ padding: 10 }}>Send</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+      {/* Input */}
+      <Input placeholder="Ask Aarav anything..." />
+    </KeyboardAvoidingView>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: Colors.bgPrimary,
+  },
+  progressWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 8,
+    backgroundColor: Colors.bgCard,
+    borderBottomWidth: 0.5,
+    borderBottomColor: Colors.border,
+  },
+  progressMeta: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 5,
+  },
+  progressLabel: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+  },
+  progressPct: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    fontWeight: "600",
+  },
+  track: {
+    height: 3,
+    backgroundColor: Colors.border,
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  fill: {
+    height: "100%",
+    backgroundColor: Colors.brandMid,
+    borderRadius: 2,
+  },
+  list: {
+    paddingTop: 14,
+    paddingBottom: 10,
+  },
+});
